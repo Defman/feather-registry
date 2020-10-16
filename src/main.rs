@@ -1,20 +1,21 @@
-use http::{uri::Uri, StatusCode};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::convert::Infallible;
-use std::path;
 use dotenv::dotenv;
+use http::{uri::Uri, StatusCode};
+use std::convert::Infallible;
 use tokio::{
     fs, io,
     io::AsyncReadExt,
     stream::{Stream, StreamExt},
     sync::mpsc,
 };
+
 use warp::{redirect, reject, Buf, Filter, Reply};
 
 use sqlx::postgres::PgPool;
 use std::env;
 use rand::Rng;
+
+mod database_structs;
+use database_structs::CrateMeta;
 
 #[derive(Debug)]
 pub enum Error {
@@ -22,7 +23,6 @@ pub enum Error {
 }
 
 impl reject::Reject for Error {}
-
 pub type Result<Ok> = std::result::Result<Ok, reject::Rejection>;
 
 fn routes(pool: PgPool) -> impl Filter<Extract = impl warp::Reply + 'static> + Clone {
@@ -46,8 +46,8 @@ fn routes(pool: PgPool) -> impl Filter<Extract = impl warp::Reply + 'static> + C
         .and(warp::path("crates"))
         .and(publish.or(dl))
         .recover(handle_rejection);
-    
-    routes
+
+    return routes;
 }
 
 #[tokio::main]
@@ -59,10 +59,9 @@ async fn main() {
         .build(&env::var("DATABASE_URL").unwrap())
         .await
         .unwrap();
-        
+
     let (worker, tx) = Worker::new(pool.clone());
     let routes = routes(pool.clone());
-
 
     tokio::spawn(worker.run());
 
@@ -77,12 +76,8 @@ struct Worker {
 impl Worker {
     fn new(pool: PgPool) -> (Self, mpsc::Sender<()>) {
         let (tx, rx) = mpsc::channel(1);
-        (Self {
-            pool,
-            rx,
-        }, tx)
+        (Self { pool, rx }, tx)
     }
-
     async fn run(mut self) {
         loop {
             let _ = self.rx.recv().await;
